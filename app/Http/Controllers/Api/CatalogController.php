@@ -4,14 +4,23 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\CatalogManager;
 use Illuminate\Http\Request;
 
 class CatalogController extends Controller
 {
-    public function catalog()
+    protected CatalogManager $manager;
+
+    public function __construct(CatalogManager $manager)
     {
-        $products = Product::select('id', 'name', 'description', 'price', 'stock')->orderBy('name')
-            ->paginate(50);
+        $this->manager = $manager;
+    }
+
+    public function catalog(Request $request)
+    {
+        $products = $this->manager->getCatalog($request);
+
         return response()->json($products);
     }
+
 }
