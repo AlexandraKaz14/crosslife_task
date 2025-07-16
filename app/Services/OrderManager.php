@@ -5,19 +5,37 @@ namespace App\Services;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Repositories\ProductRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class OrderManager
 {
+    public function __construct(protected ProductRepository $products)
+    {
+    }
+
     public function createOrder(array $data): JsonResponse
     {
         return DB::transaction(function () use ($data) {
             $user = User::find($data['user_id']);
+            $productIds = collect($data['items'])->pluck('product_id')->all();
+            $products = Product::whereIn('id', $productIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
             $orderItems = [];
+            $stockUpdates = [];
 
             foreach ($data['items'] as $item) {
-                $product = Product::where('id', $item['product_id'])->lockForUpdate()->first();
+                $product = $products->get($item['product_id']);
+
+                if (!$product) {
+                    return response()->json([
+                        'message' => "Товар с ID {$item['product_id']} не найден."
+                    ], 404);
+                }
 
                 if ($product->stock <= 0) {
                     return response()->json([
@@ -37,12 +55,16 @@ class OrderManager
                     'price' => $product->price,
                 ];
 
-                $product->decrement('stock', $item['amount']);
+                $stockUpdates[$product->id] = [
+                    'stock' => $product->stock - $item['amount'],
+                ];
             }
+
+            $this->products->bulkUpdate($stockUpdates);
 
             $order = Order::create([
                 'user_id' => $user->id,
-                'number' => (string) random_int(100000, 999999),
+                'number' => strtoupper(uniqid()),
                 'status' => Order::STATUS_DRAFT,
                 'created_at' => now(),
             ]);
